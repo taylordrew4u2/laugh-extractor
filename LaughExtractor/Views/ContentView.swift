@@ -1,0 +1,169 @@
+import SwiftUI
+
+struct ContentView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @StateObject private var model = AppModel()
+    @StateObject private var player = PreviewPlayer()
+    @State private var showSettings = true
+
+    var body: some View {
+        HSplitView {
+            main
+                .frame(minWidth: 600)
+            if showSettings {
+                SettingsView()
+            }
+        }
+        .frame(minWidth: 900, minHeight: 600)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showSettings.toggle()
+                } label: {
+                    Label("Settings", systemImage: "slider.horizontal.3")
+                }
+                .help("Show or hide detection settings")
+            }
+        }
+        // The whole point of caching frame scores: a slider change re-runs the
+        // segmenter only — no re-extraction, no re-inference.
+        .onChange(of: settings.segmenterConfig) { _, newConfig in
+            model.resegment(config: newConfig)
+        }
+        .alert("Something went wrong",
+               isPresented: Binding(get: { model.errorMessage != nil },
+                                    set: { if !$0 { model.errorMessage = nil } })) {
+            Button("OK", role: .cancel) { model.errorMessage = nil }
+        } message: {
+            Text(model.errorMessage ?? "")
+        }
+    }
+
+    private var main: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            DropZoneView(fileName: model.fileName,
+                         durationLabel: model.durationLabel) { url in
+                player.stop()
+                model.load(url: url)
+            }
+
+            if model.audio != nil {
+                waveform
+                controls
+                Divider()
+                results
+            } else {
+                Spacer()
+            }
+        }
+        .padding(16)
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private var waveform: some View {
+        if let audio = model.audio {
+            WaveformView(peaks: audio.waveformPeaks,
+                         hopSeconds: audio.waveformHopSeconds,
+                         duration: audio.duration,
+                         segments: model.segments,
+                         playhead: player.playingIndex == nil ? nil : player.playhead) { seconds in
+                guard let segment = model.segments.first(where: {
+                    seconds >= $0.startSeconds && seconds <= $0.endSeconds
+                }) else { return }
+                player.toggle(segment, in: audio.masterURL)
+            }
+            .frame(height: 84)
+        }
+    }
+
+    @ViewBuilder
+    private var controls: some View {
+        HStack(spacing: 12) {
+            switch model.phase {
+            case .extracting(let fraction):
+                ProgressView(value: fraction) { Text("Decoding audio…") }
+                    .frame(maxWidth: 320)
+                Button("Cancel") { model.cancel() }
+            case .classifying(let fraction):
+                ProgressView(value: fraction) { Text("Listening for laughter…") }
+                    .frame(maxWidth: 320)
+                Button("Cancel") { model.cancel() }
+            case .exporting(let fraction):
+                ProgressView(value: fraction) { Text("Exporting…") }
+                    .frame(maxWidth: 320)
+            case .idle, .ready:
+                Button(model.hasAnalyzed ? "Re-analyze" : "Analyze") {
+                    player.stop()
+                    model.analyze(config: settings.segmenterConfig)
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .buttonStyle(.borderedProminent)
+
+                if model.hasAnalyzed {
+                    Text("\(model.segments.count) burst\(model.segments.count == 1 ? "" : "s") · \(model.selection.count) selected")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Export Selected…") {
+                    player.stop()
+                    model.export(format: settings.exportFormat)
+                }
+                .disabled(model.selectedSegments.isEmpty)
+                .keyboardShortcut("e", modifiers: .command)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var results: some View {
+        if model.hasAnalyzed && model.segments.isEmpty {
+            emptyState
+        } else if !model.segments.isEmpty {
+            HStack {
+                Text("Bursts").font(.headline)
+                Spacer()
+                Button("Select All") { model.selectAll() }
+                    .controlSize(.small)
+                Button("None") { model.selectNone() }
+                    .controlSize(.small)
+            }
+
+            List(model.segments) { segment in
+                SegmentRowView(segment: segment,
+                               isSelected: model.selection.contains(segment.index),
+                               isPlaying: player.playingIndex == segment.index,
+                               onToggleSelection: { model.toggle(segment) },
+                               onTogglePlayback: {
+                                   guard let audio = model.audio else { return }
+                                   player.toggle(segment, in: audio.masterURL)
+                               })
+            }
+            .listStyle(.inset)
+        } else {
+            Spacer()
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Image(systemName: "waveform.slash")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.secondary)
+            Text("No laughter detected")
+                .font(.headline)
+            Text("Try lowering the laugh threshold, raising the speech ceiling a little, or shortening the minimum duration. Laughter the comedian talks over is discarded on purpose.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+}

@@ -1,0 +1,198 @@
+name: Release
+
+# Tag a commit with e.g. v1.0.0 and push it to build, sign, notarize and
+# publish a DMG to a GitHub Release.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: LaughExtractor
+  SCHEME: LaughExtractor
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+
+      - name: Derive version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Import Developer ID certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A \
+            -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          # Let codesign use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          rm -f "$CERT_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Write export options
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>developer-id</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Developer ID Application</string>
+            <key>destination</key>
+            <string>export</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Archive
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project "${APP_NAME}.xcodeproj" \
+            -scheme "${SCHEME}" \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$RUNNER_TEMP/${APP_NAME}.xcarchive" \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            DEVELOPMENT_TEAM="${TEAM_ID}" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            ENABLE_HARDENED_RUNTIME=YES \
+            OTHER_CODE_SIGN_FLAGS="--timestamp"
+
+      - name: Export signed app
+        run: |
+          set -euo pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/${APP_NAME}.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export"
+
+      - name: Verify signature and hardened runtime
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/export/${APP_NAME}.app"
+          codesign --verify --strict --verbose=2 "$APP"
+          # Notarization rejects anything without the hardened runtime, so fail
+          # here rather than after a slow round trip to Apple.
+          codesign --display --verbose=2 "$APP" 2>&1 | tee /tmp/cs.txt
+          grep -q "flags=.*runtime" /tmp/cs.txt || {
+            echo "::error::Hardened runtime is not enabled; notarization would reject this build."
+            exit 1
+          }
+
+      - name: Build DMG
+        id: dmg
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG_NAME="${APP_NAME}-${VERSION}.dmg"
+          STAGE="$RUNNER_TEMP/dmg"
+
+          mkdir -p "$STAGE"
+          cp -R "$RUNNER_TEMP/export/${APP_NAME}.app" "$STAGE/"
+          # The drag-to-install target users expect inside the disk image.
+          ln -s /Applications "$STAGE/Applications"
+
+          hdiutil create \
+            -volname "${APP_NAME}" \
+            -srcfolder "$STAGE" \
+            -ov -format UDZO \
+            "$RUNNER_TEMP/${DMG_NAME}"
+
+          echo "path=$RUNNER_TEMP/${DMG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "name=${DMG_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign DMG
+        run: |
+          set -euo pipefail
+          codesign --sign "Developer ID Application" --timestamp \
+            "${{ steps.dmg.outputs.path }}"
+
+      - name: Notarize
+        env:
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/notary.p8"
+          echo -n "$NOTARY_KEY_BASE64" | base64 --decode -o "$KEY_PATH"
+
+          xcrun notarytool submit "${{ steps.dmg.outputs.path }}" \
+            --key "$KEY_PATH" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --wait \
+            --timeout 30m
+
+          rm -f "$KEY_PATH"
+
+      - name: Staple
+        run: |
+          set -euo pipefail
+          xcrun stapler staple "${{ steps.dmg.outputs.path }}"
+          xcrun stapler validate "${{ steps.dmg.outputs.path }}"
+          # What Gatekeeper will actually say on the user's machine.
+          spctl --assess --type open --context context:primary-signature -vv \
+            "${{ steps.dmg.outputs.path }}"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.dmg.outputs.path }}
+          draft: false
+          generate_release_notes: true
+          name: ${{ steps.version.outputs.version }}
+          body: |
+            Download `${{ steps.dmg.outputs.name }}` below, open it, and drag
+            **LaughExtractor** to Applications.
+
+            The build is signed with a Developer ID certificate and notarized by
+            Apple, so it opens normally — no Gatekeeper warning and no
+            right-click workaround.
+
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true

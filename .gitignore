@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcarchive
+*.dmg
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode user state — deliberately not shared; the scheme in
+# xcshareddata/xcschemes is, because CI builds against it.
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Swift Package Manager (unused here — the app has zero dependencies)
+.build/
+.swiftpm/
+
+# Signing material must never be committed
+*.p12
+*.p8
+*.cer
+*.mobileprovision

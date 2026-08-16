@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Build and test
+        run: |
+          set -euo pipefail
+          # Ad-hoc signing, not "no signing": the app is sandboxed, and macOS
+          # refuses to launch an unsigned sandboxed test host.
+          xcodebuild test \
+            -project LaughExtractor.xcodeproj \
+            -scheme LaughExtractor \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            OTHER_CODE_SIGN_FLAGS=""
