@@ -41,8 +41,24 @@ jobs:
         if: always()
         run: |
           SDK=$(xcrun --show-sdk-path)
-          H="$SDK/System/Library/Frameworks/SoundAnalysis.framework/Headers"
-          echo "=== SNTimeDurationConstraint ==="
-          grep -rhn -B 3 -A 20 "SNTimeDurationConstraint" "$H" || true
-          echo "=== windowDuration ==="
-          grep -rhn -B 2 -A 4 "windowDuration" "$H" || true
+
+          # An empty switch makes the compiler list every missing case, which is
+          # a definitive answer whether or not the type is an enum.
+          cat > /tmp/probe.swift <<'SWIFT'
+          import SoundAnalysis
+          func probeCases(_ c: SNTimeDurationConstraint) {
+              switch c {}
+          }
+          func probeMembers(_ c: SNTimeDurationConstraint) {
+              c.__nonexistent_member_to_list_the_real_ones
+          }
+          SWIFT
+          echo "=== compiler probe ==="
+          xcrun swiftc -sdk "$SDK" -target arm64-apple-macos14.0 \
+            -typecheck /tmp/probe.swift 2>&1 | head -60 || true
+
+          echo "=== swiftinterface ==="
+          for f in $(find "$SDK" -name "*.swiftinterface" -path "*SoundAnalysis*" 2>/dev/null | head -3); do
+            echo "--- $f"
+            grep -h -B 2 -A 20 "SNTimeDurationConstraint" "$f" | head -60 || true
+          done
