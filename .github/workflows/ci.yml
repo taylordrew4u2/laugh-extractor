@@ -19,17 +19,6 @@ jobs:
       - name: Show toolchain
         run: xcodebuild -version
 
-      # Temporary: the SoundAnalysis header is the only authoritative source for
-      # SNTimeDurationConstraint's shape. Remove once window clamping is written.
-      - name: Dump SoundAnalysis API surface
-        run: |
-          SDK=$(xcrun --show-sdk-path)
-          H="$SDK/System/Library/Frameworks/SoundAnalysis.framework/Headers"
-          echo "=== SNTimeDurationConstraint ==="
-          grep -rn -B 4 -A 24 "SNTimeDurationConstraint" "$H" || true
-          echo "=== windowDuration / knownClassifications ==="
-          grep -rn "windowDuration\|knownClassifications" "$H" || true
-
       - name: Build and test
         run: |
           set -euo pipefail
@@ -44,3 +33,16 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="" \
             OTHER_CODE_SIGN_FLAGS=""
+
+      # Temporary: the SoundAnalysis header is the only authoritative source for
+      # SNTimeDurationConstraint's shape. Runs last so it lands in the log tail.
+      # Remove once window-duration clamping is written against it.
+      - name: Dump SoundAnalysis API surface
+        if: always()
+        run: |
+          SDK=$(xcrun --show-sdk-path)
+          H="$SDK/System/Library/Frameworks/SoundAnalysis.framework/Headers"
+          echo "=== SNTimeDurationConstraint ==="
+          grep -rhn -B 3 -A 20 "SNTimeDurationConstraint" "$H" || true
+          echo "=== windowDuration ==="
+          grep -rhn -B 2 -A 4 "windowDuration" "$H" || true
