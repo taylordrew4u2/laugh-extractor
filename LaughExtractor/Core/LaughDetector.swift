@@ -146,10 +146,25 @@ enum LaughDetector {
                               hopDuration: hopSeconds)
     }
 
+    /// 0.975 s is the shortest window the classifier has historically accepted,
+    /// but that isn't promised across OS versions — so ask, don't assume.
     private static func resolvedWindowDuration(for request: SNClassifySoundRequest) -> CMTime {
-        // TODO: clamp against request.windowDurationConstraint once the exact
-        // shape of SNTimeDurationConstraint is confirmed against the SDK.
-        preferredWindowDuration
+        switch request.windowDurationConstraint {
+        case .enumeratedDurations(let durations):
+            // Shortest offered duration that still meets our preference; if
+            // every option is shorter, take the longest of those — it's the
+            // closest to what we asked for.
+            let sorted = durations.sorted { $0.seconds < $1.seconds }
+            return sorted.first { $0.seconds >= preferredWindowDuration.seconds }
+                ?? sorted.last
+                ?? preferredWindowDuration
+        case .durationRange(let range):
+            if preferredWindowDuration < range.start { return range.start }
+            if preferredWindowDuration > range.end { return range.end }
+            return preferredWindowDuration
+        @unknown default:
+            return preferredWindowDuration
+        }
     }
 }
 

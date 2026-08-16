@@ -131,9 +131,14 @@ jobs:
           STAGE="$RUNNER_TEMP/dmg"
 
           mkdir -p "$STAGE"
-          cp -R "$RUNNER_TEMP/export/${APP_NAME}.app" "$STAGE/"
+          # ditto, not cp: it preserves the extended attributes and symlinks a
+          # signed bundle depends on.
+          ditto "$RUNNER_TEMP/export/${APP_NAME}.app" "$STAGE/${APP_NAME}.app"
           # The drag-to-install target users expect inside the disk image.
           ln -s /Applications "$STAGE/Applications"
+
+          # The signature must survive the copy, or notarization fails later.
+          codesign --verify --strict "$STAGE/${APP_NAME}.app"
 
           hdiutil create \
             -volname "${APP_NAME}" \
