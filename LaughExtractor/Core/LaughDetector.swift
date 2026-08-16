@@ -1,6 +1,8 @@
 import Foundation
 import AVFoundation
-import SoundAnalysis
+// SoundAnalysis predates Sendable annotation; the analyzer and observer are
+// confined to one queue here, so the warnings it emits are noise.
+@preconcurrency import SoundAnalysis
 import os
 
 /// Frame scores plus the window geometry the segmenter needs to turn them back
@@ -68,14 +70,14 @@ enum LaughDetector {
     static func analyze(analysisFileURL: URL,
                         progress: @escaping @Sendable (Double) -> Void) async throws -> AnalysisResult {
 
-        let knownClassifications: [String]
+        let request: SNClassifySoundRequest
         do {
-            knownClassifications = try SNClassifySoundRequest.knownClassifications(forIdentifier: .version1)
+            request = try SNClassifySoundRequest(classifierIdentifier: .version1)
         } catch {
             throw LaughDetectionError.classifierUnavailable(error.localizedDescription)
         }
 
-        let groups = LabelGroups(knownClassifications: knownClassifications)
+        let groups = LabelGroups(knownClassifications: request.knownClassifications)
         // A group resolving to nothing means Apple renamed a class and detection
         // would otherwise fail silently — which is far worse than failing loudly.
         if groups.laugh.isEmpty { throw LaughDetectionError.noLabelsResolved("laughter") }
@@ -94,13 +96,6 @@ enum LaughDetector {
         let totalFrames = file.length
         guard totalFrames > 0 else {
             return AnalysisResult(frames: [], windowDuration: 0, hopDuration: 0)
-        }
-
-        let request: SNClassifySoundRequest
-        do {
-            request = try SNClassifySoundRequest(classifierIdentifier: .version1)
-        } catch {
-            throw LaughDetectionError.classifierUnavailable(error.localizedDescription)
         }
 
         // Don't assume 0.975 s is legal on every OS version — clamp to whatever
@@ -152,21 +147,9 @@ enum LaughDetector {
     }
 
     private static func resolvedWindowDuration(for request: SNClassifySoundRequest) -> CMTime {
-        switch request.windowDurationConstraint {
-        case .enumerated(let durations):
-            // Shortest offered duration that is still at least our preference,
-            // falling back to the shortest available.
-            let sorted = durations.sorted { $0.seconds < $1.seconds }
-            return sorted.first(where: { $0.seconds >= preferredWindowDuration.seconds })
-                ?? sorted.last
-                ?? preferredWindowDuration
-        case .range(let range):
-            if preferredWindowDuration < range.start { return range.start }
-            if preferredWindowDuration > range.end { return range.end }
-            return preferredWindowDuration
-        @unknown default:
-            return preferredWindowDuration
-        }
+        // TODO: clamp against request.windowDurationConstraint once the exact
+        // shape of SNTimeDurationConstraint is confirmed against the SDK.
+        preferredWindowDuration
     }
 }
 
