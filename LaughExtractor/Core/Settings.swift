@@ -43,7 +43,14 @@ final class AppSettings: ObservableObject {
         static let rejectApplause = "rejectApplause"
         static let applauseCeiling = "applauseCeiling"
         static let exportFormat = "exportFormat"
+        static let settingsVersion = "settingsVersion"
     }
+
+    /// Bump when the shipped defaults change meaning, not just value — e.g.
+    /// the speech ceiling moving from a per-frame to a burst-average rule.
+    /// Stored slider positions tuned against the old semantics would silently
+    /// misbehave, so they are reset once instead.
+    private static let currentSettingsVersion = 2
 
     private let store: UserDefaults
 
@@ -83,6 +90,11 @@ final class AppSettings: ObservableObject {
         self.rejectApplause = store.bool(forKey: Key.rejectApplause)
         self.applauseCeiling = store.double(forKey: Key.applauseCeiling)
         self.exportFormat = ExportFormat(rawValue: store.string(forKey: Key.exportFormat) ?? "") ?? .m4a
+
+        if store.integer(forKey: Key.settingsVersion) < Self.currentSettingsVersion {
+            resetToDefaults()
+            store.set(Self.currentSettingsVersion, forKey: Key.settingsVersion)
+        }
     }
 
     /// The pure value the segmenter actually consumes.

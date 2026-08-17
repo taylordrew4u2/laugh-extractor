@@ -183,7 +183,9 @@ final class SegmenterTests: XCTestCase {
     }
 
     func testAmbientGateRejectsLaughterThatSitsAtTheNoiseFloor() {
-        // Laughter only 3 dB above a −60 dB floor doesn't clear the 6 dB margin.
+        // Laughter only 3 dB above a −60 dB floor doesn't clear a 6 dB margin.
+        // Pinned explicitly: the gate ships disabled.
+        config.ambientMarginDb = 6
         XCTAssertTrue(Segmenter.segments(from: roomFrames(laughLoudnessDb: -57),
                                          windowDuration: window,
                                          hopDuration: hop,
@@ -199,6 +201,7 @@ final class SegmenterTests: XCTestCase {
     func testAmbientGateDisablesItselfWithoutDynamicRange() {
         // Every frame at the same level: nothing can ever stand out, so the
         // gate must step aside rather than reject the whole recording.
+        config.ambientMarginDb = 6
         let uniform = (0..<10).map {
             FrameScore(startTime: 1.0 + Double($0) * hop,
                        laughScore: 0.85,

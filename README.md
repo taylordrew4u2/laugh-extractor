@@ -49,7 +49,7 @@ Requires macOS 14 (Sonoma) or later.
 | Laugh threshold | 0.25 | How confident the classifier must be before a window counts as laughter. |
 | Speech ceiling | 0.60 | **The no-talking rule.** Bursts whose *average* speech score is above this are rejected. Judged on the burst mean rather than per window — the classifier reports speech almost continuously in live comedy, so a per-window veto rejects nearly everything real. |
 | Laugh/speech dominance | 0.5× | A burst's average laugh score must be at least this multiple of its average speech score. 0 turns the check off. |
-| Ambient noise margin | 6 dB | Laughter must stand out this far above the recording's own noise floor, so ambient rumble doesn't qualify. 0 disables the gate; it also steps aside automatically when the recording has no dynamic range to gate on. |
+| Ambient noise margin | 0 dB (off) | Laughter must stand out this far above the recording's own noise floor. Only useful when laughs are genuinely louder than everything else — on compressed, close-mic'd recordings the loudest thing is the comedian's voice, so it ships disabled. Also steps aside automatically when the recording has no dynamic range to gate on. |
 | Minimum duration | 500 ms | Measured *after* edge trimming. |
 | Edge trim | 150 ms | Cut inward at both ends, where the comedian's voice is most likely to bleed in. |
 | Bridge gap | 100 ms | Dropouts up to this long won't split one laugh into two clips. |

@@ -22,7 +22,11 @@ struct SegmenterConfig: Equatable, Sendable {
     /// A frame must be at least this many dB louder than the recording's own
     /// noise floor, so ambient rumble the classifier half-hears as laughter
     /// doesn't qualify. 0 disables the gate.
-    var ambientMarginDb: Double = 6
+    ///
+    /// Off by default: it only helps when laughter is genuinely louder than
+    /// the rest of the recording. On compressed, close-mic'd sets the loudest
+    /// thing is the comedian's voice and the gate rejects the real laughs.
+    var ambientMarginDb: Double = 0
     /// Dropouts up to this long are bridged rather than splitting a burst in two.
     var bridgeGapMs: Double = 100
     /// Cut this much off both ends, where the comedian's voice is most likely to bleed in.

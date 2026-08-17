@@ -35,7 +35,7 @@ struct SettingsView: View {
                            range: 0...20,
                            step: 1,
                            format: "%.0f dB",
-                           help: "Laughter must stand out this far above the recording's own noise floor. 0 turns the gate off.")
+                           help: "Laughter must stand out this far above the recording's own noise floor. Only useful when laughs are louder than everything else — on compressed recordings the mic'd voice usually is. 0 (the default) turns the gate off.")
                 }
 
                 section("Boundaries") {
