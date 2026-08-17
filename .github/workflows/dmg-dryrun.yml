@@ -1,0 +1,98 @@
+name: DMG Dry Run
+
+# Proves the archive -> app bundle -> DMG mechanics work WITHOUT any signing
+# secrets, so the first real tagged release doesn't fail on a typo in a step
+# that had never executed.
+#
+# The DMG this produces is ad-hoc signed and NOT notarized. It is a pipeline
+# test, not a release artifact — macOS will quarantine it on download. The real
+# thing comes from release.yml, which needs the Developer ID secrets.
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: LaughExtractor
+  SCHEME: LaughExtractor
+
+jobs:
+  dryrun:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Archive (ad-hoc signed)
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project "${APP_NAME}.xcodeproj" \
+            -scheme "${SCHEME}" \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$RUNNER_TEMP/${APP_NAME}.xcarchive" \
+            MARKETING_VERSION="0.0.0-dryrun" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            DEVELOPMENT_TEAM="" \
+            OTHER_CODE_SIGN_FLAGS=""
+
+      # -exportArchive with method developer-id genuinely requires the real
+      # certificate, so the dry run takes the app straight out of the archive.
+      # That still exercises everything downstream of it.
+      - name: Check the archive produced a real app bundle
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app"
+          test -d "$APP" || { echo "::error::No app bundle in the archive"; exit 1; }
+          test -x "$APP/Contents/MacOS/${APP_NAME}" || { echo "::error::No executable"; exit 1; }
+
+          echo "--- Info.plist keys that matter ---"
+          for key in CFBundleIdentifier CFBundleShortVersionString LSMinimumSystemVersion NSPrincipalClass; do
+            printf '%s = ' "$key"
+            /usr/libexec/PlistBuddy -c "Print :$key" "$APP/Contents/Info.plist" || echo "(missing)"
+          done
+
+          echo "--- entitlements actually baked in ---"
+          codesign --display --entitlements - --xml "$APP" 2>/dev/null \
+            | plutil -convert xml1 -o - - || true
+
+      - name: Build DMG
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/dmg"
+          mkdir -p "$STAGE"
+          ditto "$RUNNER_TEMP/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app" \
+                "$STAGE/${APP_NAME}.app"
+          ln -s /Applications "$STAGE/Applications"
+
+          hdiutil create \
+            -volname "${APP_NAME}" \
+            -srcfolder "$STAGE" \
+            -ov -format UDZO \
+            "$RUNNER_TEMP/${APP_NAME}-dryrun.dmg"
+
+      - name: Mount the DMG and verify what the user would see
+        run: |
+          set -euo pipefail
+          MOUNT="$RUNNER_TEMP/mnt"
+          mkdir -p "$MOUNT"
+          hdiutil attach "$RUNNER_TEMP/${APP_NAME}-dryrun.dmg" \
+            -mountpoint "$MOUNT" -nobrowse -readonly
+
+          echo "--- disk image contents ---"
+          ls -l "$MOUNT"
+
+          # The two things a user needs: the app, and somewhere to drag it.
+          test -d "$MOUNT/${APP_NAME}.app" || { echo "::error::App missing from DMG"; exit 1; }
+          test -L "$MOUNT/Applications" || { echo "::error::No /Applications drop target"; exit 1; }
+          # The signature has to survive being copied into the image.
+          codesign --verify --strict "$MOUNT/${APP_NAME}.app"
+
+          hdiutil detach "$MOUNT"
+          echo "DMG mechanics verified."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UNSIGNED-dryrun-dmg-do-not-distribute
+          path: ${{ runner.temp }}/${{ env.APP_NAME }}-dryrun.dmg
+          retention-days: 7
