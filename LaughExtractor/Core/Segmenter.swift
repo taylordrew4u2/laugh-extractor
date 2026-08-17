@@ -64,6 +64,14 @@ struct DetectionDiagnostics: Equatable, Sendable {
     var kept = 0
 }
 
+/// What `segmentsNeverEmpty` produced: the segments, the diagnostics for the
+/// *configured* rules, and whether the fallback ladder had to loosen them.
+struct SegmentationOutcome: Equatable, Sendable {
+    var segments: [LaughSegment]
+    var diagnostics: DetectionDiagnostics
+    var relaxed: Bool
+}
+
 /// Turns a flat array of window scores into filtered laughter bursts.
 ///
 /// Pure logic, no framework imports, no actor isolation — that is deliberate.
@@ -209,6 +217,101 @@ enum Segmenter {
         d.kept = results.count
 
         return (results, d)
+    }
+
+    /// `segmentsWithDiagnostics`, plus a promise: if the configured rules
+    /// reject everything, a ladder of progressively looser configs runs until
+    /// something survives, ending with the single most laugh-like stretch in
+    /// the file. `relaxed` tells the UI to say so. The only way to get zero
+    /// segments is audio with nothing laugh-like in it at all.
+    ///
+    /// Diagnostics always describe the *configured* rules, so the readout
+    /// matches the sliders even when the results came from the ladder.
+    static func segmentsNeverEmpty(from frames: [FrameScore],
+                                   windowDuration: Double,
+                                   hopDuration: Double,
+                                   config: SegmenterConfig = .default) -> SegmentationOutcome {
+        let strict = segmentsWithDiagnostics(from: frames,
+                                             windowDuration: windowDuration,
+                                             hopDuration: hopDuration,
+                                             config: config)
+        if !strict.segments.isEmpty {
+            return SegmentationOutcome(segments: strict.segments,
+                                       diagnostics: strict.diagnostics,
+                                       relaxed: false)
+        }
+
+        for looser in relaxationLadder(from: config) {
+            let attempt = segmentsWithDiagnostics(from: frames,
+                                                  windowDuration: windowDuration,
+                                                  hopDuration: hopDuration,
+                                                  config: looser)
+            if !attempt.segments.isEmpty {
+                return SegmentationOutcome(segments: attempt.segments,
+                                           diagnostics: strict.diagnostics,
+                                           relaxed: true)
+            }
+        }
+
+        if let rescue = mostLaughLikeStretch(in: frames,
+                                             windowDuration: windowDuration,
+                                             hopDuration: hopDuration) {
+            return SegmentationOutcome(segments: [rescue],
+                                       diagnostics: strict.diagnostics,
+                                       relaxed: true)
+        }
+        return SegmentationOutcome(segments: [],
+                                   diagnostics: strict.diagnostics,
+                                   relaxed: false)
+    }
+
+    /// Two rungs: "noticeably looser than anything a user would set", then
+    /// "accept nearly any laugh evidence at all".
+    private static func relaxationLadder(from config: SegmenterConfig) -> [SegmenterConfig] {
+        var first = config
+        first.laughThreshold = min(config.laughThreshold, 0.15)
+        first.speechCeiling = max(config.speechCeiling, 0.80)
+        first.dominanceRatio = 0
+        first.ambientMarginDb = 0
+        first.minDurationMs = min(config.minDurationMs, 400)
+
+        var second = first
+        second.laughThreshold = 0.05
+        second.speechCeiling = 1.0
+        second.minDurationMs = min(config.minDurationMs, 300)
+        second.edgeTrimMs = min(config.edgeTrimMs, 50)
+        second.bridgeGapMs = max(config.bridgeGapMs, 200)
+
+        return [first, second]
+    }
+
+    /// ~1.5 s centred on the strongest laugh moment in the file. Returns `nil`
+    /// only when nothing resembles laughter at all (e.g. silence) — inventing
+    /// a clip out of noise would be worse than an honest empty result.
+    private static func mostLaughLikeStretch(in frames: [FrameScore],
+                                             windowDuration: Double,
+                                             hopDuration: Double) -> LaughSegment? {
+        guard hopDuration > 0,
+              let best = frames.indices.max(by: { frames[$0].laughScore < frames[$1].laughScore }),
+              frames[best].laughScore >= 0.02 else { return nil }
+
+        let halfSpan = 0.75
+        let centre = frames[best].startTime + windowDuration / 2
+        let start = max(0, centre - halfSpan)
+        let end = centre + halfSpan
+
+        let covered = frames.filter {
+            let frameCentre = $0.startTime + windowDuration / 2
+            return frameCentre >= start && frameCentre <= end
+        }
+        let count = Double(max(covered.count, 1))
+        return LaughSegment(index: 1,
+                            startSeconds: start,
+                            endSeconds: end,
+                            meanLaugh: covered.reduce(0) { $0 + $1.laughScore } / count,
+                            meanSpeech: covered.reduce(0) { $0 + $1.speechScore } / count,
+                            meanApplause: covered.reduce(0) { $0 + $1.applauseScore } / count,
+                            peakLaugh: frames[best].laughScore)
     }
 
     /// The per-frame gate: laugh confidence plus the ambient loudness check.

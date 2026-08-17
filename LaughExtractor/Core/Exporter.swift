@@ -25,10 +25,14 @@ enum Exporter {
 
     /// Slices the master buffer at each segment's timestamps and writes one file
     /// per burst. Encoding, if any, happens here and nowhere else.
+    ///
+    /// `filePrefix` keeps clips from different videos apart when several are
+    /// exported into the same folder.
     static func export(segments: [LaughSegment],
                        masterURL: URL,
                        outputDirectory: URL,
                        format: ExportFormat,
+                       filePrefix: String = "laugh",
                        progress: @escaping @Sendable (Double) -> Void) async throws -> [URL] {
         guard !segments.isEmpty else { return [] }
 
@@ -43,7 +47,7 @@ enum Exporter {
         for (offset, segment) in segments.enumerated() {
             try Task.checkCancellation()
 
-            let name = "laugh_" + String(format: "%0\(padding)d", offset + 1)
+            let name = "\(filePrefix)_" + String(format: "%0\(padding)d", offset + 1)
             let destination = outputDirectory.appendingPathComponent("\(name).\(format.fileExtension)")
 
             // Slice straight out of the lossless master.

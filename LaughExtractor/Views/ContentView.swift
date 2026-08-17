@@ -30,6 +30,9 @@ struct ContentView: View {
         .onChange(of: settings.segmenterConfig) { _, newConfig in
             model.resegment(config: newConfig)
         }
+        .onChange(of: model.currentID) { _, _ in
+            player.stop()
+        }
         .alert("Something went wrong",
                isPresented: Binding(get: { model.errorMessage != nil },
                                     set: { if !$0 { model.errorMessage = nil } })) {
@@ -41,19 +44,18 @@ struct ContentView: View {
 
     private var main: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DropZoneView(fileName: model.fileName,
-                         durationLabel: model.durationLabel) { url in
+            DropZoneView(fileName: model.current?.fileName,
+                         durationLabel: durationLabel) { urls in
                 player.stop()
-                model.load(url: url)
+                model.add(urls: urls, config: settings.segmenterConfig)
             }
 
-            if model.audio != nil {
-                waveform
-                controls
-                Divider()
-                results
-            } else if case .extracting(let fraction) = model.phase {
-                importing(fraction)
+            if model.items.count > 1 {
+                fileStrip
+            }
+
+            if let current = model.current {
+                content(for: current)
             } else {
                 Spacer()
             }
@@ -61,17 +63,154 @@ struct ContentView: View {
         .padding(16)
     }
 
-    // MARK: - Sections
+    private var durationLabel: String {
+        guard let audio = model.current?.audio else { return "" }
+        return LaughSegment.timecode(audio.duration)
+    }
+
+    // MARK: - Batch strip
+
+    /// One chip per queued video: status at a glance, click to switch.
+    private var fileStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(model.items) { item in
+                    chip(for: item)
+                }
+                Button("Clear All") {
+                    player.stop()
+                    model.reset()
+                }
+                .controlSize(.small)
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func chip(for item: VideoItem) -> some View {
+        let isCurrent = item.id == model.currentID
+        return HStack(spacing: 6) {
+            chipGlyph(for: item)
+            Text(item.fileName)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 140)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(isCurrent ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
+        )
+        .overlay(
+            Capsule().strokeBorder(isCurrent ? Color.accentColor : Color.clear, lineWidth: 1)
+        )
+        .contentShape(Capsule())
+        .onTapGesture { model.currentID = item.id }
+        .help(chipHelp(for: item))
+    }
 
     @ViewBuilder
-    private var waveform: some View {
-        if let audio = model.audio {
+    private func chipGlyph(for item: VideoItem) -> some View {
+        switch item.status {
+        case .queued:
+            Image(systemName: "clock")
+                .foregroundStyle(.secondary)
+        case .extracting, .preparingClassifier, .classifying, .finishingAnalysis:
+            ProgressView()
+                .controlSize(.mini)
+        case .ready:
+            Text("\(item.segments.count)")
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(item.relaxed ? Color.orange : Color.accentColor))
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+        }
+    }
+
+    private func chipHelp(for item: VideoItem) -> String {
+        switch item.status {
+        case .queued: return "Waiting to be processed"
+        case .extracting: return "Decoding audio…"
+        case .preparingClassifier, .classifying, .finishingAnalysis: return "Listening for laughter…"
+        case .ready: return item.relaxed
+            ? "\(item.segments.count) bursts (found with relaxed rules)"
+            : "\(item.segments.count) bursts"
+        case .failed(let message): return message
+        }
+    }
+
+    // MARK: - Current item
+
+    @ViewBuilder
+    private func content(for item: VideoItem) -> some View {
+        switch item.status {
+        case .queued:
+            centred {
+                busyRow("Waiting for its turn…", fraction: nil)
+            }
+        case .extracting(let fraction):
+            centred {
+                busyRow("Decoding audio…", fraction: fraction)
+                Button("Cancel") { model.cancel() }
+            }
+        case .preparingClassifier:
+            centred {
+                busyRow("Loading the sound classifier…", fraction: nil)
+                Button("Cancel") { model.cancel() }
+            }
+        case .classifying(let fraction):
+            centred {
+                busyRow("Listening for laughter…", fraction: fraction)
+                Button("Cancel") { model.cancel() }
+            }
+        case .finishingAnalysis:
+            centred {
+                busyRow("Finishing analysis…", fraction: nil)
+                Button("Cancel") { model.cancel() }
+            }
+        case .failed(let message):
+            centred {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+                Button("Retry") { model.retry(item.id) }
+            }
+        case .ready:
+            waveform(for: item)
+            controls(for: item)
+            Divider()
+            results(for: item)
+        }
+    }
+
+    private func centred<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 14) {
+            Spacer()
+            content()
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func waveform(for item: VideoItem) -> some View {
+        if let audio = item.audio {
             WaveformView(peaks: audio.waveformPeaks,
                          hopSeconds: audio.waveformHopSeconds,
                          duration: audio.duration,
-                         segments: model.segments,
+                         segments: item.segments,
                          playhead: player.playingIndex == nil ? nil : player.playhead) { seconds in
-                guard let segment = model.segments.first(where: {
+                guard let segment = item.segments.first(where: {
                     seconds >= $0.startSeconds && seconds <= $0.endSeconds
                 }) else { return }
                 player.toggle(segment, in: audio.masterURL)
@@ -81,62 +220,36 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var controls: some View {
+    private func controls(for item: VideoItem) -> some View {
         HStack(spacing: 12) {
-            switch model.phase {
-            case .extracting(let fraction):
-                busyRow("Decoding audio…", fraction: fraction)
+            if let progress = model.exportProgress {
+                busyRow("Exporting clip \(min(progress.completed + 1, progress.total)) of \(progress.total)…",
+                        fraction: progress.total > 0 ? Double(progress.completed) / Double(progress.total) : nil)
                 Button("Cancel") { model.cancel() }
-            case .preparingClassifier:
-                busyRow("Loading the sound classifier…", fraction: nil)
-                Button("Cancel") { model.cancel() }
-            case .classifying(let fraction):
-                busyRow("Listening for laughter…", fraction: fraction)
-                Button("Cancel") { model.cancel() }
-            case .finishingAnalysis:
-                busyRow("Finishing analysis…", fraction: nil)
-                Button("Cancel") { model.cancel() }
-            case .exporting(let completed, let total):
-                busyRow("Exporting clip \(min(completed + 1, total)) of \(total)…",
-                        fraction: total > 0 ? Double(completed) / Double(total) : nil)
-                Button("Cancel") { model.cancel() }
-            case .idle, .ready:
-                Button(model.hasAnalyzed ? "Re-analyze" : "Analyze") {
-                    player.stop()
-                    model.analyze(config: settings.segmenterConfig)
-                }
-                .keyboardShortcut(.return, modifiers: .command)
-                .buttonStyle(.borderedProminent)
-
-                if model.hasAnalyzed {
-                    Text("\(model.segments.count) burst\(model.segments.count == 1 ? "" : "s") · \(model.selection.count) selected")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
+            } else {
+                Text("\(item.segments.count) burst\(item.segments.count == 1 ? "" : "s") · \(item.selection.count) selected")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
 
                 Spacer()
 
                 Button("Export Selected…") {
                     player.stop()
-                    model.export(format: settings.exportFormat)
+                    model.exportCurrent(format: settings.exportFormat)
                 }
-                .disabled(model.selectedSegments.isEmpty)
+                .disabled(item.selection.isEmpty)
                 .keyboardShortcut("e", modifiers: .command)
+
+                if model.completedItems.count > 1 {
+                    Button("Export All…") {
+                        player.stop()
+                        model.exportAll(format: settings.exportFormat)
+                    }
+                    .disabled(model.completedItems.allSatisfy(\.selection.isEmpty))
+                    .help("Exports every video's selected bursts, prefixed with each video's name.")
+                }
             }
         }
-    }
-
-    /// Import feedback. Before extraction finishes there is no waveform, no
-    /// controls row, nothing — without this the drop of a long video looks
-    /// like the app ignored it.
-    private func importing(_ fraction: Double) -> some View {
-        VStack(spacing: 14) {
-            Spacer()
-            busyRow("Decoding audio…", fraction: fraction)
-            Button("Cancel") { model.cancel() }
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
     }
 
     /// Status row for any busy phase: an always-animating spinner (so the app
@@ -159,11 +272,20 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Results
+
     @ViewBuilder
-    private var results: some View {
-        if model.hasAnalyzed && model.segments.isEmpty {
-            emptyState
-        } else if !model.segments.isEmpty {
+    private func results(for item: VideoItem) -> some View {
+        if item.segments.isEmpty {
+            emptyState(for: item)
+        } else {
+            if item.relaxed {
+                Label("Nothing passed the current settings — showing the most laugh-like bursts found with relaxed rules.",
+                      systemImage: "wand.and.rays")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
             HStack {
                 Text("Bursts").font(.headline)
                 Spacer()
@@ -173,23 +295,21 @@ struct ContentView: View {
                     .controlSize(.small)
             }
 
-            List(model.segments) { segment in
+            List(item.segments) { segment in
                 SegmentRowView(segment: segment,
-                               isSelected: model.selection.contains(segment.index),
+                               isSelected: item.selection.contains(segment.index),
                                isPlaying: player.playingIndex == segment.index,
                                onToggleSelection: { model.toggle(segment) },
                                onTogglePlayback: {
-                                   guard let audio = model.audio else { return }
+                                   guard let audio = item.audio else { return }
                                    player.toggle(segment, in: audio.masterURL)
                                })
             }
             .listStyle(.inset)
-        } else {
-            Spacer()
         }
     }
 
-    private var emptyState: some View {
+    private func emptyState(for item: VideoItem) -> some View {
         VStack(spacing: 8) {
             Spacer()
             Image(systemName: "waveform.slash")
@@ -197,12 +317,12 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             Text("No laughter detected")
                 .font(.headline)
-            Text("Try lowering the laugh threshold or the ambient noise margin, or shortening the minimum duration. Bursts whose average is more talk than laugh are discarded on purpose.")
+            Text("Even the relaxed fallback found nothing laugh-like in this audio. Check that the recording contains audible audience laughter.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
-            if let diagnostics = model.diagnostics {
+            if let diagnostics = item.diagnostics {
                 diagnosticsView(diagnostics)
                     .padding(.top, 8)
             }
@@ -211,8 +331,8 @@ struct ContentView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Which of the three detection rules is doing the rejecting, updated live
-    /// as the sliders move. A rule whose pass count is near zero is the culprit.
+    /// Which detection stage is doing the rejecting, updated live as the
+    /// sliders move. A stage whose count sits at zero is the culprit.
     private func diagnosticsView(_ d: DetectionDiagnostics) -> some View {
         VStack(spacing: 3) {
             if let floor = d.noiseFloorDb {

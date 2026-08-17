@@ -31,16 +31,22 @@ Requires macOS 14 (Sonoma) or later.
 
 ## How to use it
 
-1. **Drop a video in** — MP4, MOV, M4A, MP3 or WAV.
-2. **Click Analyze.** The audio is decoded and run through the system sound
-   classifier. Progress is shown as it goes.
-3. **Look at the waveform.** Detected bursts are highlighted. This is the fastest
+1. **Drop videos in** — MP4, MOV, M4A, MP3 or WAV, several at once if you like.
+   Each is decoded and analyzed automatically, one at a time; a chip strip shows
+   every file's progress and burst count, and clicking a chip switches to it.
+2. **Look at the waveform.** Detected bursts are highlighted. This is the fastest
    way to see whether detection is over- or under-firing.
-4. **Nudge the thresholds.** Moving a slider re-runs *only* the segmenter — no
-   re-decoding, no re-classifying — so the burst list updates instantly. Tune
-   until the clips sound clean.
-5. **Tick the ones you want** and hit **Export Selected**. Files land as
-   `laugh_01`, `laugh_02`, … in a folder you choose, and Finder opens on them.
+3. **Nudge the thresholds.** Moving a slider re-runs *only* the segmenter — no
+   re-decoding, no re-classifying — so the burst list updates instantly, across
+   every analyzed video. Tune until the clips sound clean.
+4. **Tick the ones you want** and hit **Export Selected** — or **Export All** to
+   write every video's selected bursts in one go. A single video exports as
+   `laugh_01`, `laugh_02`, …; a batch prefixes each clip with its video's name.
+
+Analysis never comes back empty-handed on real material: if your settings
+reject everything, detection automatically retries with progressively relaxed
+rules — down to the single most laugh-like stretch in the file — and labels
+those results so you know the sliders, not the audio, were the reason.
 
 ### Tuning
 

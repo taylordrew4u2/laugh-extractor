@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 struct DropZoneView: View {
     let fileName: String?
     let durationLabel: String
-    let onPick: (URL) -> Void
+    let onPick: ([URL]) -> Void
 
     @State private var isTargeted = false
     @State private var isImporting = false
@@ -42,9 +42,9 @@ struct DropZoneView: View {
                     Image(systemName: "arrow.down.doc")
                         .font(.system(size: 32, weight: .light))
                         .foregroundStyle(.secondary)
-                    Text("Drop a stand-up video here")
+                    Text("Drop stand-up videos here")
                         .font(.headline)
-                    Text("MP4, MOV, M4A, MP3 or WAV")
+                    Text("MP4, MOV, M4A, MP3 or WAV — several at once is fine")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Choose File…") { isImporting = true }
@@ -55,18 +55,22 @@ struct DropZoneView: View {
         .frame(height: fileName == nil ? 160 : 76)
         .contentShape(Rectangle())
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
-            guard let provider = providers.first else { return false }
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                guard let url else { return }
-                Task { @MainActor in onPick(url) }
+            guard !providers.isEmpty else { return false }
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    // Providers resolve independently, so each URL is handed
+                    // over as it arrives; the model appends to its queue.
+                    Task { @MainActor in onPick([url]) }
+                }
             }
             return true
         }
         .fileImporter(isPresented: $isImporting,
                       allowedContentTypes: AudioExtractor.supportedContentTypes,
-                      allowsMultipleSelection: false) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                onPick(url)
+                      allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result, !urls.isEmpty {
+                onPick(urls)
             }
         }
         .animation(.easeInOut(duration: 0.15), value: isTargeted)

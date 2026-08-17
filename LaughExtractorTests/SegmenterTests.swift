@@ -215,6 +215,71 @@ final class SegmenterTests: XCTestCase {
                                           config: config).count, 1)
     }
 
+    // MARK: - Never-empty fallback
+
+    func testFallbackRelaxesUntilSomethingSurvives() {
+        // Laughter well below the configured 0.25 threshold, but real: the
+        // ladder should find it and flag the result as relaxed.
+        let faint = (0..<12).map {
+            FrameScore(startTime: 1.0 + Double($0) * hop,
+                       laughScore: 0.10,
+                       speechScore: 0.02,
+                       applauseScore: 0)
+        }
+        let outcome = Segmenter.segmentsNeverEmpty(from: faint,
+                                                   windowDuration: window,
+                                                   hopDuration: hop,
+                                                   config: config)
+        XCTAssertFalse(outcome.segments.isEmpty)
+        XCTAssertTrue(outcome.relaxed)
+    }
+
+    func testFallbackRescuesTheBestStretchWhenEvenRelaxedRulesFail() {
+        // A single strong blip is too short for any duration rule, so the
+        // ladder fails — the rescue still returns the stretch around it.
+        let frames = (0..<50).map { i in
+            FrameScore(startTime: Double(i) * hop,
+                       laughScore: i == 25 ? 0.5 : 0.0,
+                       speechScore: 0.9,
+                       applauseScore: 0)
+        }
+        let outcome = Segmenter.segmentsNeverEmpty(from: frames,
+                                                   windowDuration: window,
+                                                   hopDuration: hop,
+                                                   config: config)
+        XCTAssertEqual(outcome.segments.count, 1)
+        XCTAssertTrue(outcome.relaxed)
+        // Centred on the blip at 2.5 s.
+        XCTAssertEqual(outcome.segments[0].startSeconds, 1.75, accuracy: 0.0001)
+        XCTAssertEqual(outcome.segments[0].endSeconds, 3.25, accuracy: 0.0001)
+    }
+
+    func testFallbackStaysEmptyWhenNothingResemblesLaughter() {
+        // Silence-grade laugh scores: inventing a clip would be worse than
+        // an honest empty result.
+        let silence = (0..<50).map {
+            FrameScore(startTime: Double($0) * hop,
+                       laughScore: 0.0,
+                       speechScore: 0.0,
+                       applauseScore: 0)
+        }
+        let outcome = Segmenter.segmentsNeverEmpty(from: silence,
+                                                   windowDuration: window,
+                                                   hopDuration: hop,
+                                                   config: config)
+        XCTAssertTrue(outcome.segments.isEmpty)
+        XCTAssertFalse(outcome.relaxed)
+    }
+
+    func testFallbackIsNotUsedWhenTheConfiguredRulesSucceed() {
+        let outcome = Segmenter.segmentsNeverEmpty(from: frames("LLLLLLLLLL"),
+                                                   windowDuration: window,
+                                                   hopDuration: hop,
+                                                   config: config)
+        XCTAssertEqual(outcome.segments.count, 1)
+        XCTAssertFalse(outcome.relaxed)
+    }
+
     // MARK: - Reported statistics
 
     func testSegmentCarriesMeanAndPeakScores() {
