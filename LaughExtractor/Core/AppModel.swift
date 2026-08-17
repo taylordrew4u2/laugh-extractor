@@ -32,6 +32,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var audio: ExtractedAudio?
     @Published private(set) var segments: [LaughSegment] = []
+    @Published private(set) var diagnostics: DetectionDiagnostics?
     @Published private(set) var hasAnalyzed = false
     @Published var selection: Set<Int> = []
     @Published var errorMessage: String?
@@ -127,6 +128,7 @@ final class AppModel: ObservableObject {
                                       windowDuration: analysis.windowDuration,
                                       hopDuration: analysis.hopDuration,
                                       config: config)
+        diagnostics = Segmenter.diagnostics(from: analysis.frames, config: config)
         // Segment indices are reassigned on every pass, so re-selecting by index
         // only makes sense for the ones that still exist.
         selection = selectAll
@@ -220,6 +222,7 @@ final class AppModel: ObservableObject {
         audio = nil
         analysis = nil
         segments = []
+        diagnostics = nil
         selection = []
         hasAnalyzed = false
         errorMessage = nil

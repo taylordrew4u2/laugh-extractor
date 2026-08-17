@@ -84,8 +84,9 @@ final class SegmenterTests: XCTestCase {
     }
 
     func testDominanceRatioRejectsLaughterThatBarelyBeatsSpeech() {
-        // Speech is under the ceiling, but laughter only doubles it — the
-        // default 3× dominance requirement isn't met.
+        // Speech is under the ceiling, but laughter only doubles it — a 3×
+        // dominance requirement isn't met. Pinned explicitly because the test
+        // exercises the mechanism, not whatever the shipping default is.
         let borderline = (0..<12).map {
             FrameScore(startTime: 1.0 + Double($0) * hop,
                        laughScore: 0.20,
@@ -93,6 +94,7 @@ final class SegmenterTests: XCTestCase {
                        applauseScore: 0)
         }
         config.laughThreshold = 0.15
+        config.dominanceRatio = 3.0
         XCTAssertTrue(Segmenter.segments(from: borderline,
                                          windowDuration: window,
                                          hopDuration: hop,
@@ -157,6 +159,57 @@ final class SegmenterTests: XCTestCase {
 
         // Below the ceiling it survives even with rejection on.
         XCTAssertEqual(segment("LLLLLLLLLL", applause: 0.2).count, 1)
+    }
+
+    // MARK: - Ambient noise gate
+
+    /// A quiet room at −60 dB, laughter that barely rises above it, and loud
+    /// non-laugh crowd noise that gives the recording real dynamic range.
+    private func roomFrames(laughLoudnessDb: Double) -> [FrameScore] {
+        var scores: [FrameScore] = []
+        func add(_ count: Int, laugh: Double, dbfs: Double) {
+            for _ in 0..<count {
+                scores.append(FrameScore(startTime: 1.0 + Double(scores.count) * hop,
+                                         laughScore: laugh,
+                                         speechScore: 0.02,
+                                         applauseScore: 0,
+                                         loudnessDb: dbfs))
+            }
+        }
+        add(20, laugh: 0.05, dbfs: -60)              // room tone
+        add(10, laugh: 0.85, dbfs: laughLoudnessDb)  // the laugh under test
+        add(10, laugh: 0.05, dbfs: -20)              // loud crowd noise
+        return scores
+    }
+
+    func testAmbientGateRejectsLaughterThatSitsAtTheNoiseFloor() {
+        // Laughter only 3 dB above a −60 dB floor doesn't clear the 6 dB margin.
+        XCTAssertTrue(Segmenter.segments(from: roomFrames(laughLoudnessDb: -57),
+                                         windowDuration: window,
+                                         hopDuration: hop,
+                                         config: config).isEmpty)
+
+        // The same laughter, loud enough to stand out, survives.
+        XCTAssertEqual(Segmenter.segments(from: roomFrames(laughLoudnessDb: -20),
+                                          windowDuration: window,
+                                          hopDuration: hop,
+                                          config: config).count, 1)
+    }
+
+    func testAmbientGateDisablesItselfWithoutDynamicRange() {
+        // Every frame at the same level: nothing can ever stand out, so the
+        // gate must step aside rather than reject the whole recording.
+        let uniform = (0..<10).map {
+            FrameScore(startTime: 1.0 + Double($0) * hop,
+                       laughScore: 0.85,
+                       speechScore: 0.02,
+                       applauseScore: 0,
+                       loudnessDb: -30)
+        }
+        XCTAssertEqual(Segmenter.segments(from: uniform,
+                                          windowDuration: window,
+                                          hopDuration: hop,
+                                          config: config).count, 1)
     }
 
     // MARK: - Reported statistics

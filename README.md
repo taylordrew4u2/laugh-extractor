@@ -46,20 +46,23 @@ Requires macOS 14 (Sonoma) or later.
 
 | Setting | Default | What it does |
 |---|---|---|
-| Laugh threshold | 0.45 | How confident the classifier must be before a window counts as laughter. |
-| Speech ceiling | 0.12 | **The no-talking rule.** Windows scoring above this for speech are rejected outright. Keep it strict. |
-| Laugh/speech dominance | 3.0× | Laughter must beat speech by at least this factor. |
+| Laugh threshold | 0.25 | How confident the classifier must be before a window counts as laughter. |
+| Speech ceiling | 0.30 | **The no-talking rule.** Windows scoring above this for speech are rejected outright. Tighten it to cut talked-over laughs. |
+| Laugh/speech dominance | 1.5× | Laughter must beat speech by at least this factor. |
+| Ambient noise margin | 6 dB | Laughter must stand out this far above the recording's own noise floor, so ambient rumble doesn't qualify. 0 disables the gate; it also steps aside automatically when the recording has no dynamic range to gate on. |
 | Minimum duration | 500 ms | Measured *after* edge trimming. |
 | Edge trim | 150 ms | Cut inward at both ends, where the comedian's voice is most likely to bleed in. |
 | Bridge gap | 100 ms | Dropouts up to this long won't split one laugh into two clips. |
 
-Defaults are tuned for a close-mic'd comic in a small room. Larger rooms with
-more crowd noise want a **higher** laugh threshold and a **slightly looser**
-speech ceiling.
+Defaults are forgiving on purpose: a first pass that finds too much is easy to
+tune down, one that finds nothing is a dead end. For a close-mic'd comic in a
+quiet room, **raise** the laugh threshold and **tighten** the speech ceiling
+until the false positives drop off.
 
-Getting nothing? Lower the laugh threshold first, then shorten the minimum
-duration. If a laugh you can clearly hear is being skipped, it's probably being
-talked over — that's intentional.
+Getting nothing? The "No laughter detected" screen shows the classifier's peak
+scores and how many windows passed each rule — the rule passing near zero
+windows is the one to loosen. If a laugh you can clearly hear is being skipped,
+it's probably being talked over — that's intentional.
 
 ## Output formats
 

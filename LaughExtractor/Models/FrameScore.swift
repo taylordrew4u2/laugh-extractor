@@ -10,11 +10,20 @@ struct FrameScore: Equatable, Sendable {
     let laughScore: Double
     let speechScore: Double
     let applauseScore: Double
+    /// RMS level of the window's audio in dBFS (0 is full scale, silence is
+    /// deeply negative). What the ambient noise gate compares against the
+    /// recording's own noise floor.
+    let loudnessDb: Double
 
-    init(startTime: Double, laughScore: Double, speechScore: Double, applauseScore: Double = 0) {
+    init(startTime: Double,
+         laughScore: Double,
+         speechScore: Double,
+         applauseScore: Double = 0,
+         loudnessDb: Double = 0) {
         self.startTime = startTime
         self.laughScore = laughScore
         self.speechScore = speechScore
         self.applauseScore = applauseScore
+        self.loudnessDb = loudnessDb
     }
 }

@@ -36,6 +36,7 @@ final class AppSettings: ObservableObject {
         static let laughThreshold = "laughThreshold"
         static let speechCeiling = "speechCeiling"
         static let dominanceRatio = "dominanceRatio"
+        static let ambientMarginDb = "ambientMarginDb"
         static let bridgeGapMs = "bridgeGapMs"
         static let edgeTrimMs = "edgeTrimMs"
         static let minDurationMs = "minDurationMs"
@@ -49,6 +50,7 @@ final class AppSettings: ObservableObject {
     @Published var laughThreshold: Double { didSet { store.set(laughThreshold, forKey: Key.laughThreshold) } }
     @Published var speechCeiling: Double { didSet { store.set(speechCeiling, forKey: Key.speechCeiling) } }
     @Published var dominanceRatio: Double { didSet { store.set(dominanceRatio, forKey: Key.dominanceRatio) } }
+    @Published var ambientMarginDb: Double { didSet { store.set(ambientMarginDb, forKey: Key.ambientMarginDb) } }
     @Published var bridgeGapMs: Double { didSet { store.set(bridgeGapMs, forKey: Key.bridgeGapMs) } }
     @Published var edgeTrimMs: Double { didSet { store.set(edgeTrimMs, forKey: Key.edgeTrimMs) } }
     @Published var minDurationMs: Double { didSet { store.set(minDurationMs, forKey: Key.minDurationMs) } }
@@ -62,6 +64,7 @@ final class AppSettings: ObservableObject {
             Key.laughThreshold: defaults.laughThreshold,
             Key.speechCeiling: defaults.speechCeiling,
             Key.dominanceRatio: defaults.dominanceRatio,
+            Key.ambientMarginDb: defaults.ambientMarginDb,
             Key.bridgeGapMs: defaults.bridgeGapMs,
             Key.edgeTrimMs: defaults.edgeTrimMs,
             Key.minDurationMs: defaults.minDurationMs,
@@ -73,6 +76,7 @@ final class AppSettings: ObservableObject {
         self.laughThreshold = store.double(forKey: Key.laughThreshold)
         self.speechCeiling = store.double(forKey: Key.speechCeiling)
         self.dominanceRatio = store.double(forKey: Key.dominanceRatio)
+        self.ambientMarginDb = store.double(forKey: Key.ambientMarginDb)
         self.bridgeGapMs = store.double(forKey: Key.bridgeGapMs)
         self.edgeTrimMs = store.double(forKey: Key.edgeTrimMs)
         self.minDurationMs = store.double(forKey: Key.minDurationMs)
@@ -86,6 +90,7 @@ final class AppSettings: ObservableObject {
         SegmenterConfig(laughThreshold: laughThreshold,
                         speechCeiling: speechCeiling,
                         dominanceRatio: dominanceRatio,
+                        ambientMarginDb: ambientMarginDb,
                         bridgeGapMs: bridgeGapMs,
                         edgeTrimMs: edgeTrimMs,
                         minDurationMs: minDurationMs,
@@ -98,6 +103,7 @@ final class AppSettings: ObservableObject {
         laughThreshold = defaults.laughThreshold
         speechCeiling = defaults.speechCeiling
         dominanceRatio = defaults.dominanceRatio
+        ambientMarginDb = defaults.ambientMarginDb
         bridgeGapMs = defaults.bridgeGapMs
         edgeTrimMs = defaults.edgeTrimMs
         minDurationMs = defaults.minDurationMs

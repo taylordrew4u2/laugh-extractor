@@ -6,11 +6,19 @@ import Foundation
 /// the settings sliders write into and what the unit tests construct by hand.
 struct SegmenterConfig: Equatable, Sendable {
     /// A frame must score at least this to count as laughter.
-    var laughThreshold: Double = 0.45
+    ///
+    /// Defaults are deliberately forgiving: the classifier's laughter confidence
+    /// on real room recordings rarely gets near its ceiling, and a first run
+    /// that finds too much is tunable while one that finds nothing is a dead end.
+    var laughThreshold: Double = 0.25
     /// …and at most this for speech. This is what enforces the no-talking rule.
-    var speechCeiling: Double = 0.12
+    var speechCeiling: Double = 0.30
     /// …and laughter must beat speech by at least this factor.
-    var dominanceRatio: Double = 3.0
+    var dominanceRatio: Double = 1.5
+    /// …and the window must be at least this many dB louder than the
+    /// recording's own noise floor, so ambient rumble the classifier half-hears
+    /// as laughter doesn't qualify. 0 disables the gate.
+    var ambientMarginDb: Double = 6
     /// Dropouts up to this long are bridged rather than splitting a burst in two.
     var bridgeGapMs: Double = 100
     /// Cut this much off both ends, where the comedian's voice is most likely to bleed in.
@@ -21,6 +29,23 @@ struct SegmenterConfig: Equatable, Sendable {
     var applauseCeiling: Double = 0.5
 
     static let `default` = SegmenterConfig()
+}
+
+/// Per-rule pass counts for the current analysis + config, so "no laughter
+/// detected" can say which rule did the rejecting instead of leaving the user
+/// to bisect three sliders.
+struct DetectionDiagnostics: Equatable, Sendable {
+    var frameCount = 0
+    var peakLaugh = 0.0
+    var peakSpeech = 0.0
+    /// `nil` when the ambient gate isn't active (margin 0, or the recording
+    /// has no dynamic range to gate on).
+    var noiseFloorDb: Double?
+    var passedLaugh = 0
+    var passedSpeech = 0
+    var passedDominance = 0
+    var passedAmbient = 0
+    var passedAll = 0
 }
 
 /// Turns a flat array of window scores into filtered laughter bursts.
@@ -50,6 +75,7 @@ enum Segmenter {
                          config: SegmenterConfig = .default) -> [LaughSegment] {
         guard !frames.isEmpty, hopDuration > 0 else { return [] }
 
+        let noiseFloor = activeNoiseFloor(for: frames, config: config)
         let halfHop = hopDuration / 2
         let halfWindow = windowDuration / 2
 
@@ -60,7 +86,7 @@ enum Segmenter {
         var runs: [ClosedRange<Int>] = []
         var runStart: Int?
         for (i, frame) in frames.enumerated() {
-            if isLaughPositive(frame, config: config) {
+            if isLaughPositive(frame, config: config, noiseFloorDb: noiseFloor) {
                 if runStart == nil { runStart = i }
             } else if let start = runStart {
                 runs.append(start...(i - 1))
@@ -119,11 +145,60 @@ enum Segmenter {
         return results
     }
 
-    /// All three conditions must hold. The speech ceiling is the important one:
+    /// All conditions must hold. The speech ceiling is the important one:
     /// laughter over the comedian's voice is discarded, never trimmed around.
-    static func isLaughPositive(_ frame: FrameScore, config: SegmenterConfig) -> Bool {
+    /// Pass a `noiseFloorDb` to also require the frame to stand out above the
+    /// room by the configured ambient margin.
+    static func isLaughPositive(_ frame: FrameScore,
+                                config: SegmenterConfig,
+                                noiseFloorDb: Double? = nil) -> Bool {
         frame.laughScore >= config.laughThreshold
             && frame.speechScore <= config.speechCeiling
             && frame.laughScore >= frame.speechScore * config.dominanceRatio
+            && passesAmbientGate(frame, config: config, noiseFloorDb: noiseFloorDb)
+    }
+
+    /// The recording's own noise floor — the 20th percentile of frame loudness,
+    /// i.e. the level "the room" sits at — or `nil` when gating is off or can't
+    /// work: if the whole recording never rises above its floor by the margin
+    /// (heavily limited audio, synthetic fixtures), gating on loudness would
+    /// reject everything while distinguishing nothing.
+    static func activeNoiseFloor(for frames: [FrameScore], config: SegmenterConfig) -> Double? {
+        guard config.ambientMarginDb > 0, !frames.isEmpty else { return nil }
+        let sorted = frames.map(\.loudnessDb).sorted()
+        let floor = sorted[sorted.count / 5]
+        let loud = sorted[min(sorted.count - 1, sorted.count * 95 / 100)]
+        guard loud - floor >= config.ambientMarginDb else { return nil }
+        return floor
+    }
+
+    private static func passesAmbientGate(_ frame: FrameScore,
+                                          config: SegmenterConfig,
+                                          noiseFloorDb: Double?) -> Bool {
+        guard let noiseFloorDb else { return true }
+        return frame.loudnessDb >= noiseFloorDb + config.ambientMarginDb
+    }
+
+    /// Scores every frame against each rule independently, so the UI can show
+    /// which one is rejecting everything. Same single-pass cost as segmenting.
+    static func diagnostics(from frames: [FrameScore],
+                            config: SegmenterConfig) -> DetectionDiagnostics {
+        var d = DetectionDiagnostics()
+        d.frameCount = frames.count
+        d.noiseFloorDb = activeNoiseFloor(for: frames, config: config)
+        for frame in frames {
+            d.peakLaugh = max(d.peakLaugh, frame.laughScore)
+            d.peakSpeech = max(d.peakSpeech, frame.speechScore)
+            let laugh = frame.laughScore >= config.laughThreshold
+            let speech = frame.speechScore <= config.speechCeiling
+            let dominance = frame.laughScore >= frame.speechScore * config.dominanceRatio
+            let ambient = passesAmbientGate(frame, config: config, noiseFloorDb: d.noiseFloorDb)
+            if laugh { d.passedLaugh += 1 }
+            if speech { d.passedSpeech += 1 }
+            if dominance { d.passedDominance += 1 }
+            if ambient { d.passedAmbient += 1 }
+            if laugh && speech && dominance && ambient { d.passedAll += 1 }
+        }
+        return d
     }
 }

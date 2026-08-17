@@ -187,8 +187,36 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
+            if let diagnostics = model.diagnostics {
+                diagnosticsView(diagnostics)
+                    .padding(.top, 8)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// Which of the three detection rules is doing the rejecting, updated live
+    /// as the sliders move. A rule whose pass count is near zero is the culprit.
+    private func diagnosticsView(_ d: DetectionDiagnostics) -> some View {
+        VStack(spacing: 3) {
+            if let floor = d.noiseFloorDb {
+                Text("Classifier peaks — laugh \(score(d.peakLaugh)) · speech \(score(d.peakSpeech))"
+                     + " · noise floor \(String(format: "%.0f", floor)) dB")
+            } else {
+                Text("Classifier peaks — laugh \(score(d.peakLaugh)) · speech \(score(d.peakSpeech))"
+                     + " · ambient gate off")
+            }
+            Text("Windows passing each rule (of \(d.frameCount)) — "
+                 + "laugh threshold: \(d.passedLaugh) · speech ceiling: \(d.passedSpeech) · "
+                 + "dominance: \(d.passedDominance) · ambient: \(d.passedAmbient) · all: \(d.passedAll)")
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+    }
+
+    private func score(_ value: Double) -> String {
+        String(format: "%.2f", value)
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Accelerate
 // SoundAnalysis predates Sendable annotation; the analyzer and observer are
 // confined to one queue here, so the warnings it emits are noise.
 @preconcurrency import SoundAnalysis
@@ -125,6 +126,10 @@ enum LaughDetector {
         let analyzer = SNAudioStreamAnalyzer(format: format)
         try analyzer.add(request, withObserver: observer)
 
+        // Measured from the same stream the classifier hears, so the ambient
+        // noise gate judges exactly what was classified.
+        let envelope = RMSEnvelope(sampleRate: format.sampleRate)
+
         let chunkFrames: AVAudioFrameCount = 16_384
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -139,6 +144,7 @@ enum LaughDetector {
                         if buffer.frameLength == 0 { break }
 
                         analyzer.analyze(buffer, atAudioFramePosition: position)
+                        envelope.accumulate(buffer, startingAt: position)
                         position += AVAudioFramePosition(buffer.frameLength)
                         progress(.classifying(min(1.0, Double(position) / Double(totalFrames))))
                     }
@@ -158,7 +164,16 @@ enum LaughDetector {
 
         if let failure = observer.failure { throw failure }
 
-        return AnalysisResult(frames: observer.frames(),
+        let frames = observer.frames().map { frame in
+            FrameScore(startTime: frame.startTime,
+                       laughScore: frame.laughScore,
+                       speechScore: frame.speechScore,
+                       applauseScore: frame.applauseScore,
+                       loudnessDb: envelope.loudnessDb(from: frame.startTime,
+                                                       to: frame.startTime + windowSeconds))
+        }
+
+        return AnalysisResult(frames: frames,
                               windowDuration: windowSeconds,
                               hopDuration: hopSeconds)
     }
@@ -248,5 +263,68 @@ private final class ClassificationObserver: NSObject, SNResultsObserving, @unche
 
     func requestDidComplete(_ request: SNRequest) {
         completion.signal()
+    }
+}
+
+/// Mean-square energy of the analysis stream in coarse cells, queryable per
+/// classifier window once streaming finishes.
+///
+/// Touched only from the analysis queue while streaming and read only after
+/// the continuation resumes, so there is no concurrent access — hence
+/// `@unchecked Sendable`, same justification as the observer above.
+private final class RMSEnvelope: @unchecked Sendable {
+
+    /// 25 ms cells: fine enough that a ~1 s window averages ~40 of them,
+    /// coarse enough that an hour of audio is a ~144k-element array.
+    private static let cellDuration = 0.025
+    /// dBFS reported for digital silence, and the lowest value ever returned.
+    private static let silenceDb = -100.0
+
+    private let cellFrames: Int
+    private let sampleRate: Double
+    private var sumSquares: [Double] = []
+    private var counts: [Int] = []
+
+    init(sampleRate: Double) {
+        self.sampleRate = sampleRate
+        self.cellFrames = max(1, Int(sampleRate * Self.cellDuration))
+    }
+
+    func accumulate(_ buffer: AVAudioPCMBuffer, startingAt position: AVAudioFramePosition) {
+        guard let samples = buffer.floatChannelData?[0] else { return }
+        let total = Int(buffer.frameLength)
+        var offset = 0
+        while offset < total {
+            let cell = (Int(position) + offset) / cellFrames
+            let cellEnd = (cell + 1) * cellFrames - Int(position)
+            let take = min(cellEnd, total) - offset
+            while sumSquares.count <= cell {
+                sumSquares.append(0)
+                counts.append(0)
+            }
+            var sum: Float = 0
+            vDSP_svesq(samples + offset, 1, &sum, vDSP_Length(take))
+            sumSquares[cell] += Double(sum)
+            counts[cell] += take
+            offset += take
+        }
+    }
+
+    /// Mean RMS level over `[from, to]` seconds, in dBFS.
+    func loudnessDb(from: Double, to: Double) -> Double {
+        guard !sumSquares.isEmpty, to > from else { return Self.silenceDb }
+        let first = max(0, Int(from * sampleRate) / cellFrames)
+        let last = min(sumSquares.count - 1, Int(to * sampleRate) / cellFrames)
+        guard first <= last else { return Self.silenceDb }
+
+        var sum = 0.0
+        var count = 0
+        for cell in first...last {
+            sum += sumSquares[cell]
+            count += counts[cell]
+        }
+        guard count > 0 else { return Self.silenceDb }
+        let meanSquare = sum / Double(count)
+        return max(Self.silenceDb, 10 * log10(max(meanSquare, 1e-10)))
     }
 }

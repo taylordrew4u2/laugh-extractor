@@ -29,6 +29,13 @@ struct SettingsView: View {
                            step: 0.1,
                            format: "%.1f×",
                            help: "Laughter must beat speech by at least this factor.")
+
+                    slider("Ambient noise margin",
+                           value: $settings.ambientMarginDb,
+                           range: 0...20,
+                           step: 1,
+                           format: "%.0f dB",
+                           help: "Laughter must stand out this far above the recording's own noise floor. 0 turns the gate off.")
                 }
 
                 section("Boundaries") {
@@ -86,7 +93,7 @@ struct SettingsView: View {
                 Button("Reset to Defaults") { settings.resetToDefaults() }
                     .controlSize(.small)
 
-                Text("Defaults are tuned for a close-mic'd comic in a small room. Bigger rooms want a higher laugh threshold and a slightly looser speech ceiling.")
+                Text("Defaults are forgiving on purpose — a first pass that finds too much is tunable, one that finds nothing is a dead end. Raise the laugh threshold and lower the speech ceiling until the false positives drop off.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
