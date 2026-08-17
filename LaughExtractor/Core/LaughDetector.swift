@@ -13,6 +13,16 @@ struct AnalysisResult: Sendable {
     let hopDuration: Double
 }
 
+/// Progress through analysis, including the stages that have no meaningful
+/// fraction — loading the classifier model and waiting for the analyzer to
+/// flush its last results. Both can take seconds, and the UI needs to show
+/// *something* during them or the app looks hung.
+enum AnalysisProgress: Sendable, Equatable {
+    case preparingClassifier
+    case classifying(Double)
+    case finishing
+}
+
 enum LaughDetectionError: LocalizedError {
     case classifierUnavailable(String)
     case noLabelsResolved(String)
@@ -68,7 +78,11 @@ enum LaughDetector {
     private static let overlapFactor = 0.9
 
     static func analyze(analysisFileURL: URL,
-                        progress: @escaping @Sendable (Double) -> Void) async throws -> AnalysisResult {
+                        progress: @escaping @Sendable (AnalysisProgress) -> Void) async throws -> AnalysisResult {
+
+        // Creating the request loads a CoreML model, which can take seconds on
+        // first use — report it so the UI isn't sitting on a dead 0%.
+        progress(.preparingClassifier)
 
         let request: SNClassifySoundRequest
         do {
@@ -126,8 +140,12 @@ enum LaughDetector {
 
                         analyzer.analyze(buffer, atAudioFramePosition: position)
                         position += AVAudioFramePosition(buffer.frameLength)
-                        progress(min(1.0, Double(position) / Double(totalFrames)))
+                        progress(.classifying(min(1.0, Double(position) / Double(totalFrames))))
                     }
+                    // Results can trail the last buffer by several seconds, so
+                    // switch to an explicit "finishing" state instead of leaving
+                    // the bar frozen at 100%.
+                    progress(.finishing)
                     analyzer.completeAnalysis()
                     observer.waitForCompletion()
                     continuation.resume()
@@ -139,7 +157,6 @@ enum LaughDetector {
         }
 
         if let failure = observer.failure { throw failure }
-        progress(1.0)
 
         return AnalysisResult(frames: observer.frames(),
                               windowDuration: windowSeconds,
@@ -169,7 +186,10 @@ enum LaughDetector {
 }
 
 /// Collects classification results off the analysis queue.
-private final class ClassificationObserver: NSObject, SNResultsObserving {
+///
+/// All mutable state is guarded by `lock`, so the instance is safe to hand to
+/// the `@Sendable` analysis closure — hence `@unchecked Sendable`.
+private final class ClassificationObserver: NSObject, SNResultsObserving, @unchecked Sendable {
 
     private let groups: LabelGroups
     private let lock = NSLock()

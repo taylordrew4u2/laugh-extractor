@@ -83,16 +83,21 @@ struct ContentView: View {
         HStack(spacing: 12) {
             switch model.phase {
             case .extracting(let fraction):
-                ProgressView(value: fraction) { Text("Decoding audio…") }
-                    .frame(maxWidth: 320)
+                busyRow("Decoding audio…", fraction: fraction)
+                Button("Cancel") { model.cancel() }
+            case .preparingClassifier:
+                busyRow("Loading the sound classifier…", fraction: nil)
                 Button("Cancel") { model.cancel() }
             case .classifying(let fraction):
-                ProgressView(value: fraction) { Text("Listening for laughter…") }
-                    .frame(maxWidth: 320)
+                busyRow("Listening for laughter…", fraction: fraction)
                 Button("Cancel") { model.cancel() }
-            case .exporting(let fraction):
-                ProgressView(value: fraction) { Text("Exporting…") }
-                    .frame(maxWidth: 320)
+            case .finishingAnalysis:
+                busyRow("Finishing analysis…", fraction: nil)
+                Button("Cancel") { model.cancel() }
+            case .exporting(let completed, let total):
+                busyRow("Exporting clip \(min(completed + 1, total)) of \(total)…",
+                        fraction: total > 0 ? Double(completed) / Double(total) : nil)
+                Button("Cancel") { model.cancel() }
             case .idle, .ready:
                 Button(model.hasAnalyzed ? "Re-analyze" : "Analyze") {
                     player.stop()
@@ -115,6 +120,26 @@ struct ContentView: View {
                 }
                 .disabled(model.selectedSegments.isEmpty)
                 .keyboardShortcut("e", modifiers: .command)
+            }
+        }
+    }
+
+    /// Status row for any busy phase: an always-animating spinner (so the app
+    /// visibly isn't frozen even when the fraction stalls), the stage label,
+    /// and — when the stage has a measurable fraction — a bar with a percentage.
+    private func busyRow(_ label: String, fraction: Double?) -> some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            if let fraction {
+                ProgressView(value: fraction) { Text(label) }
+                    .frame(maxWidth: 320)
+                Text(fraction.formatted(.percent.precision(.fractionLength(0))))
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(label)
+                    .font(.callout)
             }
         }
     }

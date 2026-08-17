@@ -13,14 +13,18 @@ final class AppModel: ObservableObject {
     enum Phase: Equatable {
         case idle
         case extracting(Double)
+        /// Loading the CoreML classifier — no fraction to report, just "working".
+        case preparingClassifier
         case classifying(Double)
+        /// Waiting for the analyzer to deliver its trailing results.
+        case finishingAnalysis
         case ready
-        case exporting(Double)
+        case exporting(completed: Int, total: Int)
 
         var isBusy: Bool {
             switch self {
             case .idle, .ready: return false
-            case .extracting, .classifying, .exporting: return true
+            case .extracting, .preparingClassifier, .classifying, .finishingAnalysis, .exporting: return true
             }
         }
     }
@@ -90,9 +94,15 @@ final class AppModel: ObservableObject {
         work = Task { [weak self] in
             guard let self else { return }
             do {
-                await self.setPhase(.classifying(0))
-                let result = try await LaughDetector.analyze(analysisFileURL: audio.analysisURL) { fraction in
-                    Task { @MainActor [weak self] in self?.phase = .classifying(fraction) }
+                await self.setPhase(.preparingClassifier)
+                let result = try await LaughDetector.analyze(analysisFileURL: audio.analysisURL) { update in
+                    Task { @MainActor [weak self] in
+                        switch update {
+                        case .preparingClassifier: self?.phase = .preparingClassifier
+                        case .classifying(let fraction): self?.phase = .classifying(fraction)
+                        case .finishing: self?.phase = .finishingAnalysis
+                        }
+                    }
                 }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -135,12 +145,18 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             defer { folder.stopAccessingSecurityScopedResource() }
             do {
-                await self.setPhase(.exporting(0))
+                let total = chosen.count
+                await self.setPhase(.exporting(completed: 0, total: total))
                 let urls = try await Exporter.export(segments: chosen,
                                                      masterURL: audio.masterURL,
                                                      outputDirectory: folder,
                                                      format: format) { fraction in
-                    Task { @MainActor [weak self] in self?.phase = .exporting(fraction) }
+                    // The exporter reports (finished ÷ total), so this recovers
+                    // the exact clip count for the "clip N of M" label.
+                    let completed = Int((fraction * Double(total)).rounded())
+                    Task { @MainActor [weak self] in
+                        self?.phase = .exporting(completed: completed, total: total)
+                    }
                 }
                 await MainActor.run {
                     self.phase = .ready
