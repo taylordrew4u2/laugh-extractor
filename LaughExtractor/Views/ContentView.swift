@@ -52,6 +52,8 @@ struct ContentView: View {
                 controls
                 Divider()
                 results
+            } else if case .extracting(let fraction) = model.phase {
+                importing(fraction)
             } else {
                 Spacer()
             }
@@ -122,6 +124,19 @@ struct ContentView: View {
                 .keyboardShortcut("e", modifiers: .command)
             }
         }
+    }
+
+    /// Import feedback. Before extraction finishes there is no waveform, no
+    /// controls row, nothing — without this the drop of a long video looks
+    /// like the app ignored it.
+    private func importing(_ fraction: Double) -> some View {
+        VStack(spacing: 14) {
+            Spacer()
+            busyRow("Decoding audio…", fraction: fraction)
+            Button("Cancel") { model.cancel() }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     /// Status row for any busy phase: an always-animating spinner (so the app

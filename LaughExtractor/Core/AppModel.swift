@@ -37,12 +37,15 @@ final class AppModel: ObservableObject {
     @Published var selection: Set<Int> = []
     @Published var errorMessage: String?
     @Published var lastExportFolder: URL?
+    /// Name of the file being decoded, so the UI has something to show between
+    /// the drop and the extracted audio arriving.
+    @Published private(set) var pendingFileName: String?
 
     /// Cached inference output. Never recomputed for a threshold change.
     private var analysis: AnalysisResult?
     private var work: Task<Void, Never>?
 
-    var fileName: String? { audio?.sourceURL.lastPathComponent }
+    var fileName: String? { audio?.sourceURL.lastPathComponent ?? pendingFileName }
     var duration: Double { audio?.duration ?? 0 }
 
     var durationLabel: String {
@@ -59,6 +62,7 @@ final class AppModel: ObservableObject {
     func load(url: URL) {
         work?.cancel()
         reset()
+        pendingFileName = url.lastPathComponent
 
         work = Task { [weak self] in
             guard let self else { return }
@@ -76,10 +80,14 @@ final class AppModel: ObservableObject {
                 }
                 await MainActor.run {
                     self.audio = extracted
+                    self.pendingFileName = nil
                     self.phase = .idle
                 }
             } catch is CancellationError {
-                await self.setPhase(.idle)
+                await MainActor.run {
+                    self.pendingFileName = nil
+                    self.phase = .idle
+                }
             } catch {
                 await self.fail(error)
             }
@@ -215,12 +223,14 @@ final class AppModel: ObservableObject {
 
     func cancel() {
         work?.cancel()
+        if audio == nil { pendingFileName = nil }
         phase = hasAnalyzed ? .ready : .idle
     }
 
     func reset() {
         if let audio { AudioExtractor.cleanUp(audio) }
         audio = nil
+        pendingFileName = nil
         analysis = nil
         segments = []
         diagnostics = nil
@@ -237,6 +247,7 @@ final class AppModel: ObservableObject {
     private func fail(_ error: Error) async {
         await MainActor.run {
             self.errorMessage = error.localizedDescription
+            if self.audio == nil { self.pendingFileName = nil }
             self.phase = self.hasAnalyzed ? .ready : .idle
         }
     }
