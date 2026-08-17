@@ -147,16 +147,14 @@ xcodebuild test -project LaughExtractor.xcodeproj -scheme LaughExtractor \
 Accelerate are all first-party Apple frameworks that ship with the OS. There is
 no package manifest and nothing to install.
 
-### Cutting a release
+### Cutting a release — how the DMG actually gets built
 
-Releases are built, signed, notarized, stapled and published by
-`.github/workflows/release.yml`, triggered by pushing a `v*` tag:
+`.github/workflows/release.yml` does the whole thing: build, sign, notarize,
+staple, and publish the DMG to a GitHub Release. It needs two things from you,
+in this order.
 
-```sh
-git tag v1.0.0 && git push origin v1.0.0
-```
-
-It needs these repository secrets:
+**1. Add the signing secrets** (Settings → Secrets and variables → Actions).
+Until these exist the workflow fails immediately, and no DMG is produced:
 
 | Secret | What it is |
 |---|---|
@@ -170,10 +168,25 @@ It needs these repository secrets:
 
 Developer ID Application is a **different certificate type** from the App Store
 distribution one — generate it separately in the Certificates section of your
-Apple Developer account.
+Apple Developer account. You already have a paid account, so it's there to
+create; it just isn't the same cert you ship to the App Store with.
 
-You'll also want to change `PRODUCT_BUNDLE_IDENTIFIER` in the project from
+**2. Push a version tag.** That's what triggers the build:
+
+```sh
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+Watch it under the Actions tab. When it finishes, the DMG is attached to a new
+Release and the download badge at the top of this page starts working.
+
+Before the first release, change `PRODUCT_BUNDLE_IDENTIFIER` in the project from
 `com.laughextractor.LaughExtractor` to something under your own domain.
+
+There's also `.github/workflows/dmg-dryrun.yml` — run it manually from the
+Actions tab to exercise the archive → app bundle → DMG mechanics without any
+secrets. It proves the plumbing works, but what it produces is ad-hoc signed
+and unnotarized, so it's a pipeline test, not something to hand to anyone.
 
 Skipping notarization isn't viable: an unsigned DMG on macOS 14+ throws a
 "damaged and can't be opened" error that looks exactly like malware, and the

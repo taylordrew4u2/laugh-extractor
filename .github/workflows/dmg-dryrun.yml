@@ -46,15 +46,29 @@ jobs:
           test -d "$APP" || { echo "::error::No app bundle in the archive"; exit 1; }
           test -x "$APP/Contents/MacOS/${APP_NAME}" || { echo "::error::No executable"; exit 1; }
 
+          # GENERATE_INFOPLIST_FILE builds these from build settings, so a
+          # typo'd setting shows up as a missing key rather than a build error.
           echo "--- Info.plist keys that matter ---"
+          fail=0
           for key in CFBundleIdentifier CFBundleShortVersionString LSMinimumSystemVersion NSPrincipalClass; do
-            printf '%s = ' "$key"
-            /usr/libexec/PlistBuddy -c "Print :$key" "$APP/Contents/Info.plist" || echo "(missing)"
+            if value=$(/usr/libexec/PlistBuddy -c "Print :$key" "$APP/Contents/Info.plist" 2>/dev/null); then
+              echo "$key = $value"
+            else
+              echo "::error::Info.plist is missing $key"
+              fail=1
+            fi
           done
+          [ "$fail" -eq 0 ] || exit 1
 
+          # The sandbox entitlement is what lets the app read the file the user
+          # drops in; shipping without it would break the app for everyone.
           echo "--- entitlements actually baked in ---"
           codesign --display --entitlements - --xml "$APP" 2>/dev/null \
-            | plutil -convert xml1 -o - - || true
+            | plutil -convert xml1 -o - - | tee /tmp/ents.xml
+          grep -q "com.apple.security.app-sandbox" /tmp/ents.xml \
+            || { echo "::error::app-sandbox entitlement did not make it into the build"; exit 1; }
+          grep -q "com.apple.security.files.user-selected.read-write" /tmp/ents.xml \
+            || { echo "::error::user-selected files entitlement is missing"; exit 1; }
 
       - name: Build DMG
         run: |
