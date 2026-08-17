@@ -124,11 +124,12 @@ final class AppModel: ObservableObject {
     func resegment(config: SegmenterConfig, selectAll: Bool = false) {
         guard let analysis else { return }
         let previous = selection
-        segments = Segmenter.segments(from: analysis.frames,
-                                      windowDuration: analysis.windowDuration,
-                                      hopDuration: analysis.hopDuration,
-                                      config: config)
-        diagnostics = Segmenter.diagnostics(from: analysis.frames, config: config)
+        let result = Segmenter.segmentsWithDiagnostics(from: analysis.frames,
+                                                       windowDuration: analysis.windowDuration,
+                                                       hopDuration: analysis.hopDuration,
+                                                       config: config)
+        segments = result.segments
+        diagnostics = result.diagnostics
         // Segment indices are reassigned on every pass, so re-selecting by index
         // only makes sense for the ones that still exist.
         selection = selectAll

@@ -66,27 +66,27 @@ final class SegmenterTests: XCTestCase {
         XCTAssertTrue(segment("LLLLLLL").isEmpty)
     }
 
-    // MARK: - The no-talking rule
+    // MARK: - The no-talking rule (judged on burst averages)
 
-    func testFrameWithHighLaughAndHighSpeechIsRejected() {
-        // Every frame is laughter *and* talking. Nothing should survive.
+    func testBurstThatIsMostlyTalkIsRejected() {
+        // Every frame is laughter *and* talking — the burst's average speech
+        // is far over the ceiling, so nothing survives.
         XCTAssertTrue(segment("TTTTTTTTTTTT").isEmpty)
     }
 
-    func testTalkedOverFramesSplitABurstRatherThanBeingAbsorbed() {
-        // A long stretch of talked-over laughter in the middle is not salvaged:
-        // it splits the burst, and the halves are judged on their own.
+    func testBrieflyTalkedOverLaughterStaysOneBurst() {
+        // A short talked-over stretch inside a long laugh doesn't split it:
+        // the burst is judged on its average, which stays laugh-dominated.
         let results = segment("LLLLLLLLLLTTTTTLLLLLLLLLL")
-        XCTAssertEqual(results.count, 2)
-        for result in results {
-            XCTAssertEqual(result.duration, 0.7, accuracy: 0.0001)
-        }
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0].duration, 2.2, accuracy: 0.0001)
+        XCTAssertEqual(results[0].meanSpeech, (20 * 0.02 + 5 * 0.70) / 25, accuracy: 0.0001)
     }
 
     func testDominanceRatioRejectsLaughterThatBarelyBeatsSpeech() {
-        // Speech is under the ceiling, but laughter only doubles it — a 3×
-        // dominance requirement isn't met. Pinned explicitly because the test
-        // exercises the mechanism, not whatever the shipping default is.
+        // Average speech is under the ceiling, but average laughter only
+        // doubles it — a 3× dominance requirement isn't met. Pinned explicitly
+        // because the test exercises the mechanism, not the shipping default.
         let borderline = (0..<12).map {
             FrameScore(startTime: 1.0 + Double($0) * hop,
                        laughScore: 0.20,

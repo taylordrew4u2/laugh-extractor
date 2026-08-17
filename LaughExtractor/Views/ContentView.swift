@@ -182,7 +182,7 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             Text("No laughter detected")
                 .font(.headline)
-            Text("Try lowering the laugh threshold, raising the speech ceiling a little, or shortening the minimum duration. Laughter the comedian talks over is discarded on purpose.")
+            Text("Try lowering the laugh threshold or the ambient noise margin, or shortening the minimum duration. Bursts whose average is more talk than laugh are discarded on purpose.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -207,9 +207,11 @@ struct ContentView: View {
                 Text("Classifier peaks — laugh \(score(d.peakLaugh)) · speech \(score(d.peakSpeech))"
                      + " · ambient gate off")
             }
-            Text("Windows passing each rule (of \(d.frameCount)) — "
-                 + "laugh threshold: \(d.passedLaugh) · speech ceiling: \(d.passedSpeech) · "
-                 + "dominance: \(d.passedDominance) · ambient: \(d.passedAmbient) · all: \(d.passedAll)")
+            Text("Windows (of \(d.frameCount)) — laugh ≥ threshold: \(d.passedLaugh) · "
+                 + "above noise floor: \(d.passedAmbient) · both: \(d.laughPositive)")
+            Text("Bursts — candidates: \(d.candidateBursts) · too short: \(d.rejectedShort) · "
+                 + "too talky: \(d.rejectedTalky) · weak dominance: \(d.rejectedDominance) · "
+                 + "applause: \(d.rejectedApplause) · kept: \(d.kept)")
         }
         .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)

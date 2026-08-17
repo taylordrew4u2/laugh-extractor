@@ -18,17 +18,17 @@ struct SettingsView: View {
 
                     slider("Speech ceiling",
                            value: $settings.speechCeiling,
-                           range: 0.01...0.60,
+                           range: 0.05...1.00,
                            step: 0.01,
                            format: "%.2f",
-                           help: "The no-talking rule. Windows scoring above this for speech are rejected outright.")
+                           help: "The no-talking rule. Bursts whose average speech score is above this are rejected.")
 
                     slider("Laugh/speech dominance",
                            value: $settings.dominanceRatio,
-                           range: 1.0...8.0,
+                           range: 0.0...4.0,
                            step: 0.1,
                            format: "%.1f×",
-                           help: "Laughter must beat speech by at least this factor.")
+                           help: "A burst's average laugh score must be at least this multiple of its average speech score. 0 turns the check off.")
 
                     slider("Ambient noise margin",
                            value: $settings.ambientMarginDb,

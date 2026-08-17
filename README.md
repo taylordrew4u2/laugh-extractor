@@ -47,8 +47,8 @@ Requires macOS 14 (Sonoma) or later.
 | Setting | Default | What it does |
 |---|---|---|
 | Laugh threshold | 0.25 | How confident the classifier must be before a window counts as laughter. |
-| Speech ceiling | 0.30 | **The no-talking rule.** Windows scoring above this for speech are rejected outright. Tighten it to cut talked-over laughs. |
-| Laugh/speech dominance | 1.5× | Laughter must beat speech by at least this factor. |
+| Speech ceiling | 0.60 | **The no-talking rule.** Bursts whose *average* speech score is above this are rejected. Judged on the burst mean rather than per window — the classifier reports speech almost continuously in live comedy, so a per-window veto rejects nearly everything real. |
+| Laugh/speech dominance | 0.5× | A burst's average laugh score must be at least this multiple of its average speech score. 0 turns the check off. |
 | Ambient noise margin | 6 dB | Laughter must stand out this far above the recording's own noise floor, so ambient rumble doesn't qualify. 0 disables the gate; it also steps aside automatically when the recording has no dynamic range to gate on. |
 | Minimum duration | 500 ms | Measured *after* edge trimming. |
 | Edge trim | 150 ms | Cut inward at both ends, where the comedian's voice is most likely to bleed in. |
@@ -60,9 +60,10 @@ quiet room, **raise** the laugh threshold and **tighten** the speech ceiling
 until the false positives drop off.
 
 Getting nothing? The "No laughter detected" screen shows the classifier's peak
-scores and how many windows passed each rule — the rule passing near zero
-windows is the one to loosen. If a laugh you can clearly hear is being skipped,
-it's probably being talked over — that's intentional.
+scores, how many windows passed the frame gates, and what happened to every
+candidate burst — the stage rejecting everything is the one to loosen. If a
+laugh you can clearly hear is being skipped, its burst probably averaged more
+talk than laugh — that's intentional.
 
 ## Output formats
 
