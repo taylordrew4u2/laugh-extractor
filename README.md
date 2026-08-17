@@ -136,16 +136,37 @@ open LaughExtractor.xcodeproj
 Then just build and run — Debug builds sign ad-hoc, so no developer account is
 needed to run it locally.
 
-Tests:
+**Zero third-party dependencies.** SwiftUI, SoundAnalysis, AVFoundation and
+Accelerate are all first-party Apple frameworks that ship with the OS. There is
+no package manifest and nothing to install.
+
+### Tests
 
 ```sh
 xcodebuild test -project LaughExtractor.xcodeproj -scheme LaughExtractor \
   -destination 'platform=macOS' CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual
 ```
 
-**Zero third-party dependencies.** SwiftUI, SoundAnalysis, AVFoundation and
-Accelerate are all first-party Apple frameworks that ship with the OS. There is
-no package manifest and nothing to install.
+Two suites, both run on every push:
+
+**`SegmenterTests`** — the detection policy, driven by synthetic frame scores
+instead of audio fixtures, which is why `Segmenter` has no framework imports.
+Covers the no-talking rule, the 500 ms floor measured *after* trimming, a 100 ms
+gap bridging into one burst where 300 ms splits into two, and the degenerate
+cases: empty input, a zero hop, and an edge trim wide enough to invert a segment.
+
+**`PipelineIntegrationTests`** — the real framework path, on audio generated at
+runtime. Decodes both raw PCM and compressed AAC; checks the master keeps its
+native rate and channel count while the analysis track lands at 16 kHz mono;
+asserts the resampled length still tracks the source, which is what would break
+if timing drifted; confirms inference returns ordered frames on the expected hop
+grid; checks silence yields no bursts; and verifies both export formats write
+readable clips of the right length, with filenames zero-padded and the 20 ms
+fades reaching zero at both edges.
+
+What the suite does **not** cover is detection *accuracy*. Whether the default
+thresholds pick the right laughs out of a particular room is a listening test,
+not something an assertion can settle.
 
 ### Cutting a release — how the DMG actually gets built
 
@@ -167,9 +188,9 @@ Until these exist the workflow fails immediately, and no DMG is produced:
 | `TEAM_ID` | Your 10-character Apple Developer team ID |
 
 Developer ID Application is a **different certificate type** from the App Store
-distribution one — generate it separately in the Certificates section of your
-Apple Developer account. You already have a paid account, so it's there to
-create; it just isn't the same cert you ship to the App Store with.
+distribution one. A paid Apple Developer account can create both, but they are
+not interchangeable — generate the Developer ID one separately in the
+Certificates section of the account.
 
 **2. Push a version tag.** That's what triggers the build:
 
@@ -201,6 +222,7 @@ LaughExtractor/
 ├── Core/            AudioExtractor, LaughDetector, Segmenter, Exporter,
 │                    AppModel, PreviewPlayer, Settings
 └── Models/          LaughSegment, FrameScore
-LaughExtractorTests/ SegmenterTests
+LaughExtractorTests/ SegmenterTests, PipelineIntegrationTests
 Config/              entitlements
+.github/workflows/   ci, release, dmg-dryrun
 ```
